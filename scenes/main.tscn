@@ -1,9 +1,12 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/room_block.tscn" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="2"]
 
 [ext_resource type="Script" path="res://scripts/shift_manager.gd" id="3"]
+
+[ext_resource type="PackedScene" path="res://scenes/core.tscn" id="4"]
+[ext_resource type="Script" path="res://scripts/match_manager.gd" id="5"]
 
 [sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
 
@@ -30,6 +33,10 @@ transform = Transform3D(1, 0, 0, 0, 0.7071, 0.7071, 0, -0.7071, 0.7071, 0, 6, 0)
 room_size = Vector2(20, 20)
 floor_color = Color(0.35, 0.55, 0.9, 1)
 door_east = true
+
+[node name="BlueCore" parent="Map/BigRoomA" instance=ExtResource("4")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0, -6)
+team = 0
 
 [node name="CorridorB" parent="Map" instance=ExtResource("1")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 0, 0)
@@ -59,6 +66,10 @@ floor_color = Color(0.4, 0.8, 0.45, 1)
 door_north = true
 door_west = true
 
+[node name="RedCore" parent="Map/BigRoomG" instance=ExtResource("4")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0, 6)
+team = 1
+
 [node name="SmallRoomE" parent="Map" instance=ExtResource("1")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, 25)
 room_size = Vector2(10, 10)
@@ -68,6 +79,9 @@ door_east = true
 [node name="ShiftManager" type="Node" parent="."]
 script = ExtResource("3")
 map_path = NodePath("../Map")
+
+[node name="MatchManager" type="Node" parent="."]
+script = ExtResource("5")
 
 [node name="Player" parent="." instance=ExtResource("2")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)

@@ -8,6 +8,8 @@ extends CharacterBody3D
 @export var mouse_sensitivity: float = 0.003  # how fast the camera turns
 @export var fire_delay: float = 0.15       # seconds between shots
 @export var shoot_range: float = 100.0     # how far a bullet can reach
+@export var shot_damage: int = 5           # how much damage one bullet does
+@export var team: Team.Type = Team.Type.BLUE   # which team we are on
 
 # Gravity comes from the project's physics settings.
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
@@ -92,7 +94,13 @@ func shoot() -> void:
 	if hit.is_empty():
 		return  # we shot at the sky
 
-	# We hit something: show a small orange dot where the bullet landed.
+	# If we hit something that can be damaged (like a core), damage it.
+	# The thing itself decides whether to ignore us (e.g. our own team's core).
+	var target = hit["collider"]
+	if target.has_method("take_damage"):
+		target.take_damage(shot_damage, team)
+
+	# Show a small orange dot where the bullet landed.
 	spawn_hit_marker(hit["position"])
 
 
