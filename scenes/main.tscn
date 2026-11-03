@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/room_block.tscn" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="2"]
@@ -7,6 +7,9 @@
 
 [ext_resource type="PackedScene" path="res://scenes/core.tscn" id="4"]
 [ext_resource type="Script" path="res://scripts/match_manager.gd" id="5"]
+
+[ext_resource type="Script" path="res://scripts/nav_manager.gd" id="6"]
+[ext_resource type="Script" path="res://scripts/bot_spawner.gd" id="7"]
 
 [sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
 
@@ -82,6 +85,12 @@ map_path = NodePath("../Map")
 
 [node name="MatchManager" type="Node" parent="."]
 script = ExtResource("5")
+
+[node name="NavManager" type="Node" parent="."]
+script = ExtResource("6")
+
+[node name="BotSpawner" type="Node" parent="."]
+script = ExtResource("7")
 
 [node name="Player" parent="." instance=ExtResource("2")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)

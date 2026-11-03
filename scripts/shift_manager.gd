@@ -32,6 +32,9 @@ const SHIFT_PATTERN := [
 	],
 ]
 
+# Sent when the rooms have finished moving (the NavManager listens for this).
+signal shift_finished
+
 # --- Settings (change them in the Inspector) ---
 @export var map_path: NodePath = ^"../Map"   # where the node that holds all the rooms is
 @export var shift_interval: float = 30.0   # seconds between shifts
@@ -116,6 +119,7 @@ func _end_shift() -> void:
 	is_moving = false
 	time_left = shift_interval
 	last_second = -1
+	shift_finished.emit()
 
 
 # Makes the text at the top of the screen.

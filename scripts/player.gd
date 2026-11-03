@@ -1,6 +1,7 @@
-extends CharacterBody3D
+extends Fighter
 # The player: walks, looks around with the mouse, jumps, and shoots.
-# Stage 1 only - no health, no teams, no weapons list yet.
+# Team, health, damage, respawning and the "stuck in a wall" rescue all come
+# from fighter.gd (the "extends Fighter" line above).
 
 # --- Settings you can tweak in the Godot editor (Inspector panel) ---
 @export var walk_speed: float = 6.0        # how fast we walk (metres per second)
@@ -8,8 +9,6 @@ extends CharacterBody3D
 @export var mouse_sensitivity: float = 0.003  # how fast the camera turns
 @export var fire_delay: float = 0.15       # seconds between shots
 @export var shoot_range: float = 100.0     # how far a bullet can reach
-@export var shot_damage: int = 5           # how much damage one bullet does
-@export var team: Team.Type = Team.Type.BLUE   # which team we are on
 
 # Gravity comes from the project's physics settings.
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
@@ -17,27 +16,32 @@ var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 # Time left before we are allowed to shoot again.
 var cooldown: float = 0.0
 
-# Where we started. We go back here if we fall off the map or get stuck for good.
-var spawn_position: Vector3
-
-# A slightly smaller copy of our body, used only to check if we are inside a wall.
-# (It is smaller so that standing on the floor or touching a wall doesn't count.)
-var stuck_check_shape := CapsuleShape3D.new()
-
 # Shortcuts to child nodes (the "$" means "find the child with this name").
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera3D
 
+var health_label: Label   # "Health: 100" at the bottom-left
+var dead_label: Label     # "DEFEATED" message in the middle
+
 
 func _ready() -> void:
-	spawn_position = global_position
-	stuck_check_shape.radius = 0.35
-	stuck_check_shape.height = 1.5
+	super._ready()   # run the setup from fighter.gd first
 	# Hide the mouse cursor and lock it to the window so we can look around.
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_build_hud()
+	health_changed.connect(_update_hud)
+	_update_hud()
 
 
-func _unhandled_input(event: InputEvent) -> void:
+func _process(delta: float) -> void:
+	super._process(delta)   # the respawn countdown lives in fighter.gd
+	if is_dead:
+		dead_label.text = "DEFEATED\nRespawning in %d" % ceili(respawn_left)
+	dead_label.visible = is_dead
+
+
+func _input(event: InputEvent) -> void:
+	# (_input gets every event first, so mouse look keeps working while walking.)
 	# Mouse movement turns the camera.
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		# Left/right: turn the whole body.
@@ -54,6 +58,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if is_dead:
+		return   # defeated: no moving or shooting until we respawn
+
 	# --- Gravity and jumping ---
 	if not is_on_floor():
 		velocity.y -= gravity * delta
@@ -69,11 +76,8 @@ func _physics_process(delta: float) -> void:
 	velocity.z = direction.z * walk_speed
 	move_and_slide()
 
-	# --- Safety: rooms move, so we might fall off the map or end up inside a wall ---
-	if global_position.y < -20.0:
-		respawn()
-	elif is_stuck_at(global_position):
-		push_to_safe_spot()
+	# Rooms move, so we might fall off the map or end up inside a wall.
+	safety_check()
 
 	# --- Shooting ---
 	cooldown -= delta
@@ -84,24 +88,10 @@ func _physics_process(delta: float) -> void:
 
 
 func shoot() -> void:
-	# Fire an invisible line (a "ray") from the camera straight ahead.
-	var from := camera.global_position
-	var to := from + (-camera.global_transform.basis.z) * shoot_range
-	var query := PhysicsRayQueryParameters3D.create(from, to)
-	query.exclude = [self]  # don't hit ourselves
-
-	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	if hit.is_empty():
-		return  # we shot at the sky
-
-	# If we hit something that can be damaged (like a core), damage it.
-	# The thing itself decides whether to ignore us (e.g. our own team's core).
-	var target = hit["collider"]
-	if target.has_method("take_damage"):
-		target.take_damage(shot_damage, team)
-
-	# Show a small orange dot where the bullet landed.
-	spawn_hit_marker(hit["position"])
+	# Fire from the camera straight ahead (shoot_ray is in fighter.gd).
+	var hit := shoot_ray(camera.global_position, -camera.global_transform.basis.z, shoot_range)
+	if not hit.is_empty():
+		spawn_hit_marker(hit["position"])   # orange dot where the bullet landed
 
 
 func spawn_hit_marker(position: Vector3) -> void:
@@ -124,44 +114,26 @@ func spawn_hit_marker(position: Vector3) -> void:
 	get_tree().create_timer(2.0).timeout.connect(marker.queue_free)
 
 
-# --- Safety code for moving rooms ---
+# Builds the health text and the "DEFEATED" message on the screen.
+func _build_hud() -> void:
+	var hud: CanvasLayer = $HUD
+	health_label = Label.new()
+	health_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	health_label.offset_left = 20
+	health_label.offset_top = -60
+	health_label.add_theme_font_size_override("font_size", 32)
+	hud.add_child(health_label)
 
-# Returns true if our (slightly smaller) body is inside something solid at this position.
-func is_stuck_at(pos: Vector3) -> bool:
-	var query := PhysicsShapeQueryParameters3D.new()
-	query.shape = stuck_check_shape
-	# The check shape is centred 0.95 m above our feet.
-	query.transform = Transform3D(Basis(), pos + Vector3(0, 0.95, 0))
-	query.exclude = [get_rid()]
-	return not get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty()
-
-
-# Moves us to the nearest free spot that has a floor under it.
-func push_to_safe_spot() -> void:
-	var space := get_world_3d().direct_space_state
-	# Try rings around us: 1 metre away, then 2, then 3... up to 8.
-	for distance in range(1, 9):
-		for i in 8:
-			var angle := i * TAU / 8.0
-			var x := global_position.x + cos(angle) * distance
-			var z := global_position.z + sin(angle) * distance
-			# Look straight down from just above us to find the floor there.
-			var top := Vector3(x, global_position.y + 2.5, z)
-			var ray := PhysicsRayQueryParameters3D.create(top, top + Vector3(0, -8, 0))
-			ray.exclude = [get_rid()]
-			var hit := space.intersect_ray(ray)
-			if hit.is_empty():
-				continue  # no floor here
-			var spot: Vector3 = hit["position"] + Vector3(0, 0.05, 0)
-			if not is_stuck_at(spot):
-				global_position = spot
-				velocity = Vector3.ZERO
-				return
-	# Nowhere safe nearby: go back to the start.
-	respawn()
+	dead_label = Label.new()
+	dead_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	dead_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	dead_label.grow_vertical = Control.GROW_DIRECTION_BOTH
+	dead_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dead_label.add_theme_font_size_override("font_size", 56)
+	dead_label.modulate = Color(1, 0.3, 0.3)
+	dead_label.visible = false
+	hud.add_child(dead_label)
 
 
-# Puts us back where we started.
-func respawn() -> void:
-	global_position = spawn_position
-	velocity = Vector3.ZERO
+func _update_hud() -> void:
+	health_label.text = "Health: %d" % health
