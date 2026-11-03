@@ -33,6 +33,7 @@ func _ready() -> void:
 	super._ready()   # run the setup from fighter.gd first
 	# Hide the mouse cursor and lock it to the window so we can look around.
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	add_to_group("player")   # lets bots know which team the human is on
 	camera.cull_mask = 1   # our own camera does not show the map markers (or our own head)
 	# Give ourselves a human body: when you look down you see your arms, gun and legs.
 	body_visual = Node3D.new()

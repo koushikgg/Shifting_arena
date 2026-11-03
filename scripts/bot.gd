@@ -262,4 +262,7 @@ func _build_body() -> void:
 func _update_label() -> void:
 	label.text = "%s %s  %d" % [Team.name_of(team).to_upper(), Role.name_of(role).to_upper(), health]
 	label.modulate = Role.color_of(role)
+	# Only show names for the human player's team. Enemies stay anonymous.
+	var human = get_tree().get_first_node_in_group("player")
+	label.visible = human == null or human.team == team
 	hat.material_override.albedo_color = Role.color_of(role)
