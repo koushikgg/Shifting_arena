@@ -1,10 +1,11 @@
-extends Node3D
+extends AnimatableBody3D
 # A reusable room-block: a floor and four walls, with optional doorways.
 # You do not draw it by hand. Instead, you set a few options in the Inspector
 # (size, which sides have doorways, floor colour) and the script builds it.
 #
 # The block's origin (its middle point) is at the CENTRE of the room.
-# That makes it easy to move or rotate the whole room later (Stage 3).
+# It is an AnimatableBody3D: a solid body that can be slid or rotated by code
+# (see shift_manager.gd) and that CARRIES anything standing on it, like the player.
 #
 # Directions: North = -Z, South = +Z, East = +X, West = -X.
 
@@ -25,6 +26,10 @@ const WALL_COLOR := Color(0.75, 0.75, 0.78)
 
 
 func _ready() -> void:
+	# Tell Godot to move our solid parts in step with the physics, so the
+	# player is carried smoothly while the room moves.
+	sync_to_physics = true
+
 	_build_floor()
 	# North and south walls run along the X direction ("is_ns" = true).
 	_build_side(true, -room_size.y / 2.0 + WALL_THICKNESS / 2.0, room_size.x, door_north)
@@ -75,23 +80,22 @@ func _add_wall(is_ns: bool, fixed: float, along: float, len: float, y: float, he
 
 
 # Makes a solid box (something you can see AND bump into) at a position.
+# The parts are added straight into this room, so when the room moves,
+# everything in it moves too.
 func _add_box(pos: Vector3, size: Vector3, color: Color) -> void:
-	var body := StaticBody3D.new()   # a solid thing that never moves by itself
-	body.position = pos
-
 	var shape := CollisionShape3D.new()   # the invisible part you bump into
 	var box_shape := BoxShape3D.new()
 	box_shape.size = size
 	shape.shape = box_shape
-	body.add_child(shape)
+	shape.position = pos
+	add_child(shape)
 
 	var mesh := MeshInstance3D.new()      # the visible part
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = size
 	mesh.mesh = box_mesh
+	mesh.position = pos
 	var material := StandardMaterial3D.new()
 	material.albedo_color = color
 	mesh.material_override = material
-	body.add_child(mesh)
-
-	add_child(body)
+	add_child(mesh)

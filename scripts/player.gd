@@ -15,12 +15,22 @@ var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 # Time left before we are allowed to shoot again.
 var cooldown: float = 0.0
 
+# Where we started. We go back here if we fall off the map or get stuck for good.
+var spawn_position: Vector3
+
+# A slightly smaller copy of our body, used only to check if we are inside a wall.
+# (It is smaller so that standing on the floor or touching a wall doesn't count.)
+var stuck_check_shape := CapsuleShape3D.new()
+
 # Shortcuts to child nodes (the "$" means "find the child with this name").
 @onready var head: Node3D = $Head
 @onready var camera: Camera3D = $Head/Camera3D
 
 
 func _ready() -> void:
+	spawn_position = global_position
+	stuck_check_shape.radius = 0.35
+	stuck_check_shape.height = 1.5
 	# Hide the mouse cursor and lock it to the window so we can look around.
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -56,6 +66,12 @@ func _physics_process(delta: float) -> void:
 	velocity.x = direction.x * walk_speed
 	velocity.z = direction.z * walk_speed
 	move_and_slide()
+
+	# --- Safety: rooms move, so we might fall off the map or end up inside a wall ---
+	if global_position.y < -20.0:
+		respawn()
+	elif is_stuck_at(global_position):
+		push_to_safe_spot()
 
 	# --- Shooting ---
 	cooldown -= delta
@@ -98,3 +114,46 @@ func spawn_hit_marker(position: Vector3) -> void:
 
 	# Remove the dot after a short time so they don't pile up.
 	get_tree().create_timer(2.0).timeout.connect(marker.queue_free)
+
+
+# --- Safety code for moving rooms ---
+
+# Returns true if our (slightly smaller) body is inside something solid at this position.
+func is_stuck_at(pos: Vector3) -> bool:
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = stuck_check_shape
+	# The check shape is centred 0.95 m above our feet.
+	query.transform = Transform3D(Basis(), pos + Vector3(0, 0.95, 0))
+	query.exclude = [get_rid()]
+	return not get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty()
+
+
+# Moves us to the nearest free spot that has a floor under it.
+func push_to_safe_spot() -> void:
+	var space := get_world_3d().direct_space_state
+	# Try rings around us: 1 metre away, then 2, then 3... up to 8.
+	for distance in range(1, 9):
+		for i in 8:
+			var angle := i * TAU / 8.0
+			var x := global_position.x + cos(angle) * distance
+			var z := global_position.z + sin(angle) * distance
+			# Look straight down from just above us to find the floor there.
+			var top := Vector3(x, global_position.y + 2.5, z)
+			var ray := PhysicsRayQueryParameters3D.create(top, top + Vector3(0, -8, 0))
+			ray.exclude = [get_rid()]
+			var hit := space.intersect_ray(ray)
+			if hit.is_empty():
+				continue  # no floor here
+			var spot: Vector3 = hit["position"] + Vector3(0, 0.05, 0)
+			if not is_stuck_at(spot):
+				global_position = spot
+				velocity = Vector3.ZERO
+				return
+	# Nowhere safe nearby: go back to the start.
+	respawn()
+
+
+# Puts us back where we started.
+func respawn() -> void:
+	global_position = spawn_position
+	velocity = Vector3.ZERO

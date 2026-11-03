@@ -2,5 +2,5 @@
 
 [ext_resource type="Script" path="res://scripts/room_block.gd" id="1"]
 
-[node name="RoomBlock" type="Node3D"]
+[node name="RoomBlock" type="AnimatableBody3D"]
 script = ExtResource("1")
