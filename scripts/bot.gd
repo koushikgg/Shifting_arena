@@ -1,23 +1,30 @@
 extends Fighter
-# A computer-controlled fighter. Simple behaviour:
-#   1. Walk toward the enemy core (using Godot's navigation to find the way).
-#   2. If an enemy player or bot is visible and close enough, stop and shoot it.
-#   3. If we are defeated, fighter.gd respawns us at our base after 5 seconds.
+# A computer-controlled fighter. What it does depends on its role:
+#   ATTACKER:         walks toward the enemy core and shoots it.
+#   DEFENDER:         stays near its own core, places turrets.
+#   SHIFT CONTROLLER: stays safe at its base, and calls the early shift when an
+#                     enemy stands in a room that is about to move.
+# Every role: if an enemy is visible and in range, stop and shoot it.
+# If we are defeated, fighter.gd respawns us at our base after 5 seconds.
 # Bots never shoot teammates or their own core (fighter.gd / core.gd ignore same-team hits).
 
 const SIGHT_RANGE := 25.0       # how far a bot can see enemies (metres)
-const CORE_SHOOT_RANGE := 18.0  # how close a bot gets before shooting a core
+const CORE_SHOOT_RANGE := 18.0  # how close an attacker gets before shooting a core
 const REPLAN_EVERY := 0.5       # seconds between "find me a new path" checks
+const GUARD_RADIUS := 3.0       # defenders/controllers stand still within this of their post
 
 # Difficulty numbers (the BotSpawner sets these; see difficulty.gd).
 var settings: Dictionary = Difficulty.settings(Difficulty.Level.EASY)
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 var agent: NavigationAgent3D   # finds a path around walls for us
-var label: Label3D             # shows our health above our head
+var label: Label3D             # shows our team, role and health above our head
+var hat: MeshInstance3D        # a little block above the head, coloured by role
 var shoot_cooldown: float = 0.0
 var seen_time: float = 0.0     # how long we have been looking at an enemy
 var replan_timer: float = 0.0
+var turret_retry: float = 0.0  # defenders: wait a moment between placement tries
+var early_check_timer: float = 0.0
 
 
 func _ready() -> void:
@@ -29,6 +36,7 @@ func _ready() -> void:
 	agent.target_desired_distance = 1.5
 	add_child(agent)
 	health_changed.connect(_update_label)
+	role_changed.connect(_update_label)
 	_update_label()
 
 
@@ -52,34 +60,81 @@ func _physics_process(delta: float) -> void:
 	else:
 		seen_time = 0.0
 
-	var core := _find_enemy_core()
-	var core_point := Vector3.ZERO
-	if core:
-		core_point = core.global_position + Vector3(0, 1.25, 0)
-
 	if enemy and seen_time >= settings["reaction_time"]:
-		# 2. Stop and shoot the enemy.
+		# Stop and shoot the enemy (any role).
 		_stop_and_shoot(enemy.global_position + Vector3(0, 1.2, 0), delta)
-	elif core and global_position.distance_to(core.global_position) <= CORE_SHOOT_RANGE \
-			and _can_see(core_point, core):
-		# Close enough to the core with a clear view: stop and shoot it.
-		_stop_and_shoot(core_point, delta)
 	else:
-		# 1. Walk toward the enemy core.
-		_walk_toward(core, delta)
+		match role:
+			Role.Type.ATTACKER:
+				_act_as_attacker(delta)
+			Role.Type.DEFENDER:
+				_act_as_defender(delta)
+			_:
+				_act_as_shift_controller(delta)
 
 	move_and_slide()
 	safety_check()   # rescue us if a moving room traps us
 
+
+# --- The three roles ---
+
+func _act_as_attacker(delta: float) -> void:
+	var core := _find_core(false)
+	if core == null:
+		_stand_still()
+		return
+	var core_point := core.global_position + Vector3(0, 1.25, 0)
+	if global_position.distance_to(core.global_position) <= CORE_SHOOT_RANGE \
+			and _can_see(core_point, core):
+		_stop_and_shoot(core_point, delta)   # close enough with a clear view: shoot the core
+	else:
+		_walk_to(core.global_position, delta)   # walk toward the enemy core
+
+
+func _act_as_defender(delta: float) -> void:
+	var own_core := _find_core(true)
+	if own_core == null:
+		_stand_still()
+		return
+
+	# Place turrets near our core whenever we are allowed to.
+	turret_retry -= delta
+	if turret_placer and turret_retry <= 0.0 and turret_placer.can_place():
+		turret_retry = 1.0
+		# First turret on the side toward our base, the second to the side of that.
+		var toward_base := (spawn_position - own_core.global_position)
+		toward_base.y = 0.0
+		var angle := atan2(toward_base.z, toward_base.x) + turret_placer.active_count() * PI / 2.0
+		turret_placer.try_place(own_core.global_position + Vector3(cos(angle), 0, sin(angle)) * 3.5)
+
+	# Stay between our core and our base.
+	var toward := (spawn_position - own_core.global_position)
+	toward.y = 0.0
+	_guard(own_core.global_position + toward.normalized() * 4.0, delta)
+
+
+func _act_as_shift_controller(delta: float) -> void:
+	# Look for a chance to spring the trap (twice a second is plenty).
+	early_check_timer -= delta
+	if early_check_timer <= 0.0:
+		early_check_timer = 0.5
+		var manager = get_tree().get_first_node_in_group("shift_manager")
+		if manager and manager.can_call_early(team) and manager.enemy_in_next_moving_room(team):
+			manager.call_early_shift(team)
+	# Stay safe at our base.
+	_guard(spawn_position, delta)
+
+
+# --- Helpers ---
 
 # Where our eyes (and gun) are.
 func _eye() -> Vector3:
 	return global_position + Vector3(0, 1.5, 0)
 
 
-# Returns the closest enemy fighter we can see, or null.
-func _find_visible_enemy() -> Fighter:
-	var best: Fighter = null
+# Returns the closest enemy (player, bot or turret) we can see, or null.
+func _find_visible_enemy() -> Node3D:
+	var best: Node3D = null
 	var best_distance := SIGHT_RANGE
 	for other in get_tree().get_nodes_in_group("fighters"):
 		if other == self or other.team == team or other.is_dead:
@@ -91,9 +146,10 @@ func _find_visible_enemy() -> Fighter:
 	return best
 
 
-func _find_enemy_core() -> Node3D:
+# Finds our own core (own = true) or the enemy's core (own = false).
+func _find_core(own: bool) -> Node3D:
 	for core in get_tree().get_nodes_in_group("cores"):
-		if core.team != team and not core.is_destroyed:
+		if (core.team == team) == own and not core.is_destroyed:
 			return core
 	return null
 
@@ -107,13 +163,12 @@ func _can_see(point: Vector3, target: Node) -> bool:
 
 
 func _stop_and_shoot(point: Vector3, delta: float) -> void:
-	velocity.x = 0.0
-	velocity.z = 0.0
+	_stand_still()
 	var direction := point - _eye()
 	_face(direction, delta)
 	if shoot_cooldown > 0.0:
 		return
-	shoot_cooldown = settings["fire_delay"]
+	shoot_cooldown = settings["fire_delay"] * role_fire_delay_mult
 
 	# Bad aim: turn the shot a random small amount. Lower accuracy = bigger miss.
 	var spread := deg_to_rad((1.0 - settings["accuracy"]) * 10.0)
@@ -123,29 +178,38 @@ func _stop_and_shoot(point: Vector3, delta: float) -> void:
 	shoot_ray(_eye(), aim, SIGHT_RANGE + 5.0, true)
 
 
-func _walk_toward(core: Node3D, delta: float) -> void:
-	if core == null:
-		velocity.x = 0.0
-		velocity.z = 0.0
-		return
+func _stand_still() -> void:
+	velocity.x = 0.0
+	velocity.z = 0.0
 
+
+# Walk to "post", and stand still once we are close to it.
+func _guard(post: Vector3, delta: float) -> void:
+	var flat := Vector2(global_position.x - post.x, global_position.z - post.z)
+	if flat.length() <= GUARD_RADIUS:
+		_stand_still()
+	else:
+		_walk_to(post, delta)
+
+
+func _walk_to(point: Vector3, delta: float) -> void:
 	# Every half second (and right after a shift) ask the navigation system for a fresh path.
 	replan_timer -= delta
 	if replan_timer <= 0.0:
 		replan_timer = REPLAN_EVERY
-		agent.target_position = core.global_position
+		agent.target_position = point
 
 	if agent.is_navigation_finished():
-		velocity.x = 0.0   # reached the end of the path (or no path exists): wait here
-		velocity.z = 0.0
+		_stand_still()   # reached the end of the path (or no path exists): wait here
 		return
 
 	var next_point := agent.get_next_path_position()
 	var direction := next_point - global_position
 	direction.y = 0.0
 	direction = direction.normalized()
-	velocity.x = direction.x * settings["speed"]
-	velocity.z = direction.z * settings["speed"]
+	var speed: float = settings["speed"] * role_speed_mult   # roles change our speed
+	velocity.x = direction.x * speed
+	velocity.z = direction.z * speed
 	_face(direction, delta)
 
 
@@ -158,7 +222,7 @@ func _face(direction: Vector3, delta: float) -> void:
 
 
 # Builds the bot's body: a coloured capsule, a "gun" so you can see where it faces,
-# a health label, and the solid shape.
+# a role-coloured hat, a text label, and the solid shape.
 func _build_body() -> void:
 	var shape := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
@@ -191,15 +255,25 @@ func _build_body() -> void:
 	gun.material_override = mat
 	body_visual.add_child(gun)
 
+	hat = MeshInstance3D.new()
+	var hat_mesh := BoxMesh.new()
+	hat_mesh.size = Vector3(0.35, 0.35, 0.35)
+	hat.mesh = hat_mesh
+	hat.position = Vector3(0, 2.05, 0)
+	hat.material_override = StandardMaterial3D.new()
+	body_visual.add_child(hat)
+
 	label = Label3D.new()
-	label.position = Vector3(0, 2.3, 0)
+	label.position = Vector3(0, 2.6, 0)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.pixel_size = 0.01
 	label.font_size = 40
 	label.outline_size = 10
-	label.modulate = Team.color_of(team).lightened(0.4)
 	body_visual.add_child(label)
 
 
+# Updates the text (team, role, health) and the role colour.
 func _update_label() -> void:
-	label.text = "%s BOT  %d" % [Team.name_of(team).to_upper(), health]
+	label.text = "%s %s  %d" % [Team.name_of(team).to_upper(), Role.name_of(role).to_upper(), health]
+	label.modulate = Role.color_of(role)
+	hat.material_override.albedo_color = Role.color_of(role)

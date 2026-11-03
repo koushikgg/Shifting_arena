@@ -22,6 +22,7 @@ func _ready() -> void:
 	health = max_health
 	add_to_group("cores")   # lets other scripts find every core easily
 	_build_body()
+	_build_map_marker()
 	_update_label()
 
 
@@ -107,3 +108,19 @@ func _build_body() -> void:
 	label.outline_size = 12
 	label.modulate = Team.color_of(team).lightened(0.4)
 	add_child(label)
+
+
+# A big box high above the core, seen only by the Shift Controller's map camera
+# (visual layers 2 and 4 = blue and red markers).
+func _build_map_marker() -> void:
+	var marker := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(4, 1, 4)
+	marker.mesh = box
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Team.color_of(team)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	marker.material_override = mat
+	marker.layers = 2 | 4
+	marker.position = Vector3(0, 6, 0)
+	add_child(marker)

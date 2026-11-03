@@ -4,11 +4,11 @@ extends Fighter
 # from fighter.gd (the "extends Fighter" line above).
 
 # --- Settings you can tweak in the Godot editor (Inspector panel) ---
-@export var walk_speed: float = 6.0        # how fast we walk (metres per second)
+@export var walk_speed: float = 5.0        # base walking speed (metres per second); the role changes it
 @export var jump_speed: float = 5.0        # how strong a jump is
 @export var mouse_sensitivity: float = 0.003  # how fast the camera turns
 @export var key_look_speed: float = 2.0    # how fast the J/L/I/K keys turn the camera (radians per second)
-@export var fire_delay: float = 0.15       # seconds between shots
+@export var fire_delay: float = 0.15       # base seconds between shots; the role can change it
 @export var shoot_range: float = 100.0     # how far a bullet can reach
 
 # Gravity comes from the project's physics settings.
@@ -23,14 +23,20 @@ var cooldown: float = 0.0
 
 var health_label: Label   # "Health: 100" at the bottom-left
 var dead_label: Label     # "DEFEATED" message in the middle
+var role_label: Label     # role and ability hints in the top-left corner
+var notice_label: Label   # short messages like "Too far from your core"
+var notice_left: float = 0.0
+var map_view: MapView     # the Shift Controller's top-down map (made when first needed)
 
 
 func _ready() -> void:
 	super._ready()   # run the setup from fighter.gd first
 	# Hide the mouse cursor and lock it to the window so we can look around.
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	camera.cull_mask = 1   # our own camera does not show the map markers
 	_build_hud()
 	health_changed.connect(_update_hud)
+	role_changed.connect(_update_hud)
 	_update_hud()
 
 
@@ -39,6 +45,11 @@ func _process(delta: float) -> void:
 	if is_dead:
 		dead_label.text = "DEFEATED\nRespawning in %d" % ceili(respawn_left)
 	dead_label.visible = is_dead
+	if is_dead and map_view:
+		map_view.close()
+	_update_role_text()
+	notice_left -= delta
+	notice_label.visible = notice_left > 0.0
 
 
 func _input(event: InputEvent) -> void:
@@ -80,18 +91,41 @@ func _physics_process(delta: float) -> void:
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	# Turn that direction so "forward" means where the player is facing.
 	var direction := (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
-	velocity.x = direction.x * walk_speed
-	velocity.z = direction.z * walk_speed
+	var speed := walk_speed * role_speed_mult   # the role makes us faster or slower
+	velocity.x = direction.x * speed
+	velocity.z = direction.z * speed
 	move_and_slide()
 
 	# Rooms move, so we might fall off the map or end up inside a wall.
 	safety_check()
 
+	# --- Role abilities ---
+	if role == Role.Type.DEFENDER and Input.is_action_just_pressed("place_turret"):
+		# Put a turret 2 metres in front of us.
+		var spot := global_position + (-transform.basis.z) * 2.0
+		if turret_placer.try_place(spot):
+			_notice("Turret placed")
+		else:
+			_notice(turret_placer.message)
+	if role == Role.Type.SHIFT_CONTROLLER:
+		if Input.is_action_just_pressed("toggle_map"):
+			if map_view == null:
+				map_view = MapView.new()
+				add_child(map_view)
+				map_view.setup(self, camera, $HUD)
+			map_view.toggle()
+		if Input.is_action_just_pressed("early_shift"):
+			var manager = get_tree().get_first_node_in_group("shift_manager")
+			if manager.call_early_shift(team):
+				_notice("Early shift called!")
+			else:
+				_notice("Early shift not available")
+
 	# --- Shooting ---
 	cooldown -= delta
 	if Input.is_action_pressed("shoot") and cooldown <= 0.0 \
 			and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		cooldown = fire_delay
+		cooldown = fire_delay * role_fire_delay_mult
 		shoot()
 
 
@@ -142,6 +176,45 @@ func _build_hud() -> void:
 	dead_label.visible = false
 	hud.add_child(dead_label)
 
+	role_label = Label.new()
+	role_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	role_label.offset_left = 20
+	role_label.offset_top = 15
+	role_label.add_theme_font_size_override("font_size", 26)
+	hud.add_child(role_label)
+
+	notice_label = Label.new()
+	notice_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	notice_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	notice_label.grow_vertical = Control.GROW_DIRECTION_BOTH
+	notice_label.offset_top = 60
+	notice_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	notice_label.add_theme_font_size_override("font_size", 28)
+	notice_label.visible = false
+	hud.add_child(notice_label)
+
 
 func _update_hud() -> void:
 	health_label.text = "Health: %d" % health
+
+
+# Shows a short message in the middle of the screen for 2 seconds.
+func _notice(text: String) -> void:
+	notice_label.text = text
+	notice_left = 2.0
+
+
+# The small text in the top-left corner: our role and what its keys do.
+func _update_role_text() -> void:
+	var text := "%s - %s" % [Team.name_of(team).to_upper(), Role.name_of(role).to_upper()]
+	if role == Role.Type.DEFENDER and turret_placer:
+		var wait := ""
+		if turret_placer.cooldown_left > 0.0:
+			wait = "  (ready in %d)" % ceili(turret_placer.cooldown_left)
+		text += "\n[T] Turret  %d/%d%s" % [turret_placer.active_count(), RoleSettings.TURRET_MAX, wait]
+	elif role == Role.Type.SHIFT_CONTROLLER:
+		var manager = get_tree().get_first_node_in_group("shift_manager")
+		var left: int = manager.early_shifts_left(team) if manager else 0
+		text += "\n[M] Map   [F] Early shift: %s" % ("READY" if left > 0 else "used")
+	role_label.text = text
+	role_label.modulate = Role.color_of(role)

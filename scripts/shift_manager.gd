@@ -45,6 +45,8 @@ var map: Node3D                  # the node that holds all the rooms (found in _
 var time_left: float = 0.0       # seconds until the next shift
 var is_moving: bool = false      # true while rooms are moving
 var next_shift: int = 0          # which shift in the pattern comes next
+var early_team: int = -1          # which team called an early shift (-1 = nobody)
+var early_used: Dictionary = {}   # team -> how many early shifts it has used
 var last_second: int = -1        # used to beep once per second
 var home_positions: Dictionary = {}   # room name -> its original position
 
@@ -54,6 +56,7 @@ var beep_player: AudioStreamPlayer
 
 func _ready() -> void:
 	map = get_node(map_path)
+	add_to_group("shift_manager")   # so bots and players can find us
 	time_left = shift_interval
 
 	# Remember where each room started, so slides are measured from there.
@@ -76,7 +79,10 @@ func _process(delta: float) -> void:
 	var seconds := ceili(time_left)
 	if time_left <= warning_time:
 		# Warning: red text that flashes, and one beep per second.
-		label.text = "SHIFT IN %d!" % seconds
+		if early_team >= 0:
+			label.text = "%s EARLY SHIFT IN %d!" % [Team.name_of(early_team).to_upper(), seconds]
+		else:
+			label.text = "SHIFT IN %d!" % seconds
 		var flash_on := int(time_left * 4.0) % 2 == 0
 		label.modulate = Color(1, 0.2, 0.2) if flash_on else Color(1, 1, 1)
 		if seconds != last_second:
@@ -117,6 +123,7 @@ func _start_shift() -> void:
 # Called when all rooms have stopped moving.
 func _end_shift() -> void:
 	is_moving = false
+	early_team = -1
 	time_left = shift_interval
 	last_second = -1
 	shift_finished.emit()
@@ -152,3 +159,60 @@ func _build_beep() -> void:
 	beep_player = AudioStreamPlayer.new()
 	beep_player.stream = sound
 	add_child(beep_player)
+
+
+# --- Early shift (used by the Shift Controller role) ---
+
+# Can this team call an early shift right now?
+# Not if it has used up its early shifts, rooms are already moving, or the warning has started.
+func can_call_early(team: Team.Type) -> bool:
+	return not is_moving and time_left > warning_time \
+			and early_used.get(team, 0) < RoleSettings.EARLY_SHIFTS_PER_MATCH
+
+
+func early_shifts_left(team: Team.Type) -> int:
+	return RoleSettings.EARLY_SHIFTS_PER_MATCH - early_used.get(team, 0)
+
+
+# Jumps the countdown to the warning, so everyone gets the flashing warning and
+# beeps, and then the next shift happens. Returns true if it worked.
+func call_early_shift(team: Team.Type) -> bool:
+	if not can_call_early(team):
+		return false
+	early_used[team] = early_used.get(team, 0) + 1
+	early_team = team
+	time_left = warning_time
+	last_second = -1
+	return true
+
+
+# The rooms that will move in the NEXT shift.
+func rooms_moving_next() -> Array:
+	var rooms := []
+	for move in SHIFT_PATTERN[next_shift]:
+		rooms.append(map.get_node(move["room"]))
+	return rooms
+
+
+# True if an ENEMY of "team" is standing in a room that moves next,
+# and none of the team's own players are in that room (so we don't trap ourselves).
+func enemy_in_next_moving_room(team: Team.Type) -> bool:
+	for room in rooms_moving_next():
+		var enemy_inside := false
+		var friend_inside := false
+		for other in get_tree().get_nodes_in_group("fighters"):
+			if not other is Fighter or other.is_dead or not _is_in_room(room, other.global_position):
+				continue
+			if other.team == team:
+				friend_inside = true
+			else:
+				enemy_inside = true
+		if enemy_inside and not friend_inside:
+			return true
+	return false
+
+
+func _is_in_room(room: Node3D, point: Vector3) -> bool:
+	var local := room.to_local(point)
+	return absf(local.x) < room.room_size.x / 2.0 and absf(local.z) < room.room_size.y / 2.0 \
+			and local.y > -1.0 and local.y < 4.0
