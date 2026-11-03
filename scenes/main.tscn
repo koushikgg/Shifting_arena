@@ -1,6 +1,6 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
-[ext_resource type="PackedScene" path="res://scenes/room.tscn" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/room_block.tscn" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="2"]
 
 [sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
@@ -22,7 +22,46 @@ environment = SubResource("env")
 [node name="Sun" type="DirectionalLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.7071, 0.7071, 0, -0.7071, 0.7071, 0, 6, 0)
 
-[node name="Room" parent="." instance=ExtResource("1")]
+[node name="Map" type="Node3D" parent="."]
+
+[node name="BigRoomA" parent="Map" instance=ExtResource("1")]
+room_size = Vector2(20, 20)
+floor_color = Color(0.35, 0.55, 0.9, 1)
+door_east = true
+
+[node name="CorridorB" parent="Map" instance=ExtResource("1")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 0, 0)
+room_size = Vector2(10, 6)
+floor_color = Color(0.6, 0.6, 0.6, 1)
+door_east = true
+door_west = true
+
+[node name="SmallRoomC" parent="Map" instance=ExtResource("1")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, 0, 0)
+room_size = Vector2(10, 10)
+floor_color = Color(0.9, 0.4, 0.4, 1)
+door_south = true
+door_west = true
+
+[node name="CorridorD" parent="Map" instance=ExtResource("1")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, 0, 10)
+room_size = Vector2(6, 10)
+floor_color = Color(0.6, 0.6, 0.6, 1)
+door_north = true
+door_south = true
+
+[node name="BigRoomG" parent="Map" instance=ExtResource("1")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, 0, 25)
+room_size = Vector2(20, 20)
+floor_color = Color(0.4, 0.8, 0.45, 1)
+door_north = true
+door_west = true
+
+[node name="SmallRoomE" parent="Map" instance=ExtResource("1")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, 25)
+room_size = Vector2(10, 10)
+floor_color = Color(0.95, 0.8, 0.3, 1)
+door_east = true
 
 [node name="Player" parent="." instance=ExtResource("2")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)
