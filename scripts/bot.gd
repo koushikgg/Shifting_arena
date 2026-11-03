@@ -221,8 +221,8 @@ func _face(direction: Vector3, delta: float) -> void:
 	rotation.y = lerp_angle(rotation.y, wanted, 8.0 * delta)
 
 
-# Builds the bot's body: a coloured capsule, a "gun" so you can see where it faces,
-# a role-coloured hat, a text label, and the solid shape.
+# Builds the bot's body: a human-shaped model, a role-coloured hat, a text label,
+# and the solid shape.
 func _build_body() -> void:
 	var shape := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
@@ -235,31 +235,17 @@ func _build_body() -> void:
 	body_visual = Node3D.new()   # fighter.gd hides this when we are defeated
 	add_child(body_visual)
 
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Team.color_of(team)
-
-	var body := MeshInstance3D.new()
-	var body_mesh := CapsuleMesh.new()
-	body_mesh.radius = 0.4
-	body_mesh.height = 1.8
-	body.mesh = body_mesh
-	body.position = Vector3(0, 0.9, 0)
-	body.material_override = mat
-	body_visual.add_child(body)
-
-	var gun := MeshInstance3D.new()
-	var gun_mesh := BoxMesh.new()
-	gun_mesh.size = Vector3(0.15, 0.15, 0.7)
-	gun.mesh = gun_mesh
-	gun.position = Vector3(0.3, 1.3, -0.5)
-	gun.material_override = mat
-	body_visual.add_child(gun)
+	# A human-shaped model (see humanoid.gd) in our team's colour.
+	var person := Humanoid.new()
+	person.shirt_color = Team.color_of(team)
+	person.mover = self
+	body_visual.add_child(person)
 
 	hat = MeshInstance3D.new()
 	var hat_mesh := BoxMesh.new()
 	hat_mesh.size = Vector3(0.35, 0.35, 0.35)
 	hat.mesh = hat_mesh
-	hat.position = Vector3(0, 2.05, 0)
+	hat.position = Vector3(0, 2.0, 0)
 	hat.material_override = StandardMaterial3D.new()
 	body_visual.add_child(hat)
 
