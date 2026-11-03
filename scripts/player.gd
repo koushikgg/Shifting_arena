@@ -7,6 +7,7 @@ extends Fighter
 @export var walk_speed: float = 6.0        # how fast we walk (metres per second)
 @export var jump_speed: float = 5.0        # how strong a jump is
 @export var mouse_sensitivity: float = 0.003  # how fast the camera turns
+@export var key_look_speed: float = 2.0    # how fast the J/L/I/K keys turn the camera (radians per second)
 @export var fire_delay: float = 0.15       # seconds between shots
 @export var shoot_range: float = 100.0     # how far a bullet can reach
 
@@ -60,6 +61,13 @@ func _input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if is_dead:
 		return   # defeated: no moving or shooting until we respawn
+
+	# --- Looking with the keyboard (J/L = left/right, I/K = up/down) ---
+	# Useful if the mouse stops working while you walk (e.g. touchpad "disable while typing").
+	var look := Input.get_vector("look_left", "look_right", "look_up", "look_down")
+	rotate_y(-look.x * key_look_speed * delta)
+	head.rotation.x = clamp(head.rotation.x - look.y * key_look_speed * delta,
+			deg_to_rad(-89), deg_to_rad(89))
 
 	# --- Gravity and jumping ---
 	if not is_on_floor():
